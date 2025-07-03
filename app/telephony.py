@@ -16,7 +16,7 @@ async def voice_webhook(_: Request):
 
     # Inicia media‑stream para WebSocket
     connect = Connect()
-    connect.stream(url=config.STREAM_WSS_URL, track="both")
+    connect.stream(url=config.STREAM_WSS_URL, track="inbound")
     resp.append(connect)
 
     # Pequena pausa (sinal de áudio vazia evita cortar início)
