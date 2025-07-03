@@ -19,41 +19,14 @@ router = APIRouter()
 active_connections: Dict[str, WebSocket] = {}
 
 @router.post("/voice")
-async def voice_webhook(request: Request):
-    """Twilio chama aqui no início da ligação (TwiML)."""
-    try:
-        # Log da requisição para debug
-        body = await request.body()
-        logger.info(f"Webhook recebido: {body.decode()}")
-        
-        resp = VoiceResponse()
-        
-        # Configurar media stream
-        start = Start()
-        # URL completa com protocolo wss://
-        websocket_url = config.STREAM_WSS_URL
-        if not websocket_url.startswith('wss://'):
-            # Se não tem protocolo, adicionar
-            if websocket_url.startswith('//'):
-                websocket_url = f"wss:{websocket_url}"
-            elif not websocket_url.startswith('ws'):
-                websocket_url = f"wss://{websocket_url}"
-        
-        start.stream(url=websocket_url)
-        resp.append(start)
-        
-        # Saudação inicial após configurar o stream
-        resp.say("Olá! Aqui é o Giovanni da Musstins, tudo bem?", language="pt-BR")
-        
-        logger.info(f"TwiML gerado: {str(resp)}")
-        return Response(content=str(resp), media_type="application/xml")
-        
-    except Exception as e:
-        logger.error(f"Erro no webhook de voz: {e}")
-        # Retorna TwiML simples em caso de erro
-        resp = VoiceResponse()
-        resp.say("Desculpe, houve um problema técnico.", language="pt-BR")
-        return Response(content=str(resp), media_type="application/xml")
+async def voice_webhook(_: Request):
+    resp = VoiceResponse()
+    start = Start()
+    start.stream(url=config.STREAM_WSS_URL)
+    resp.append(start)
+    resp.pause(length=1)
+    resp.say("Olá! Aqui é o Giovanni da Musstins, tudo bem?", language="pt-BR")
+    return Response(content=str(resp), media_type="application/xml")
 
 
 @router.websocket("/twilio_stream")
