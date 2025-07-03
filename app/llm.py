@@ -19,6 +19,6 @@ async def generate_reply(history: list[str]) -> str:
         messages=messages,
         temperature=0.4,
         max_tokens=160,
-        stream=True,
+        stream=False,
     )
     return resp.choices[0].message.content.strip()

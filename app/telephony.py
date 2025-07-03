@@ -27,21 +27,52 @@ async def voice_webhook(_: Request):
 async def twilio_stream(ws: WebSocket):
     await ws.accept()
     state = agent_state.init()
+    
     try:
         while True:
             msg = await ws.receive_json()
+            
             if msg.get("event") == "media":
+                # Decodifica áudio do Twilio (formato mulaw, não wav)
                 payload = base64.b64decode(msg["media"]["payload"])
+                
+                # PROBLEMA: Twilio envia áudio em formato mulaw, não WAV
+                # Precisa converter antes de enviar para Whisper
+                
                 text = await speech.transcribe(payload)
-                if not text:
+                if not text.strip():
                     continue
+                    
+                print(f"User disse: {text}")  # Debug
                 state.user_turn(text)
 
                 reply = await llm.generate_reply(state.history)
+                print(f"Agent responde: {reply}")  # Debug
                 state.agent_turn(reply)
-                audio = await speech.synthesize(reply)
-                await ws.send_bytes(audio)
-            elif msg.get("event") == "closed":
+                
+                # Sintetiza áudio
+                audio_data = await speech.synthesize(reply)
+                
+                # PROBLEMA: Twilio espera dados em formato específico
+                # Não pode simplesmente enviar bytes de áudio
+                audio_b64 = base64.b64encode(audio_data).decode()
+                
+                # Envia no formato correto para Twilio
+                await ws.send_json({
+                    "event": "media",
+                    "media": {
+                        "payload": audio_b64
+                    }
+                })
+                
+            elif msg.get("event") == "start":
+                print("Stream iniciado")
+                
+            elif msg.get("event") == "stop":
+                print("Stream parado")
                 break
+                
+    except Exception as e:
+        print(f"Erro no WebSocket: {e}")
     finally:
         await ws.close()
