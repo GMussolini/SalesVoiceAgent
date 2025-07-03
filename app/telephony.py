@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Request, WebSocket
+from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse, Start, Stream
 import base64, asyncio
 
@@ -20,8 +21,9 @@ async def voice_webhook(_: Request):
     resp.pause(length=1)
 
     # Saudação inicial
-    resp.say("Olá! Aqui é o Renato da Musstins, tudo bem?", language="pt-BR")
-    return str(resp)
+    resp.say("Olá! Aqui é o Giovanni da Musstins, tudo bem?", language="pt-BR")
+    return Response(content=str(resp), media_type="application/xml")
+
 
 @router.websocket("/twilio_stream")
 async def twilio_stream(ws: WebSocket):
