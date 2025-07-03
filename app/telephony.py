@@ -1,7 +1,9 @@
+from asyncio import subprocess
 from fastapi import APIRouter, Request, WebSocket
 from fastapi.responses import Response
 from twilio.twiml.voice_response import VoiceResponse, Start, Stream
 import base64, asyncio
+from twilio.twiml.voice_response import Connect
 
 from app import config, speech, llm, agent_state
 
@@ -13,9 +15,9 @@ async def voice_webhook(_: Request):
     resp = VoiceResponse()
 
     # Inicia media‑stream para WebSocket
-    start = Start()
-    start.stream(url=config.STREAM_WSS_URL)
-    resp.append(start)
+    connect = Connect()
+    connect.stream(url=config.STREAM_WSS_URL, track="both")
+    resp.append(connect)
 
     # Pequena pausa (sinal de áudio vazia evita cortar início)
     resp.pause(length=1)
@@ -29,52 +31,65 @@ async def voice_webhook(_: Request):
 async def twilio_stream(ws: WebSocket):
     await ws.accept()
     state = agent_state.init()
-    
+    print("✅ Conectado ao Twilio!")
+
     try:
         while True:
             msg = await ws.receive_json()
-            
-            if msg.get("event") == "media":
-                # Decodifica áudio do Twilio (formato mulaw, não wav)
-                payload = base64.b64decode(msg["media"]["payload"])
-                
-                # PROBLEMA: Twilio envia áudio em formato mulaw, não WAV
-                # Precisa converter antes de enviar para Whisper
-                
-                text = await speech.transcribe(payload)
-                if not text.strip():
-                    continue
-                    
-                print(f"User disse: {text}")  # Debug
-                state.user_turn(text)
 
-                reply = await llm.generate_reply(state.history)
-                print(f"Agent responde: {reply}")  # Debug
-                state.agent_turn(reply)
-                
-                # Sintetiza áudio
-                audio_data = await speech.synthesize(reply)
-                
-                # PROBLEMA: Twilio espera dados em formato específico
-                # Não pode simplesmente enviar bytes de áudio
-                audio_b64 = base64.b64encode(audio_data).decode()
-                
-                # Envia no formato correto para Twilio
-                await ws.send_json({
-                    "event": "media",
-                    "media": {
-                        "payload": audio_b64
-                    }
-                })
-                
-            elif msg.get("event") == "start":
-                print("Stream iniciado")
-                
-            elif msg.get("event") == "stop":
-                print("Stream parado")
-                break
-                
+            match msg.get("event"):
+                case "start":
+                    print("🟢 Stream iniciado")
+                case "stop":
+                    print("🔴 Stream encerrado")
+                    break
+                case "media":
+                    payload = base64.b64decode(msg["media"]["payload"])
+                    wav = convert_mulaw_to_wav(payload)
+                    text = await speech.transcribe(wav)
+
+                    if not text.strip():
+                        continue
+                    
+                    print(f"👤 {text}")
+                    state.user_turn(text)
+
+                    reply = await llm.generate_reply(state.history)
+                    state.agent_turn(reply)
+                    print(f"🤖 {reply}")
+
+                    wav_reply = await speech.synthesize(reply)
+                    mulaw = convert_wav_to_mulaw(wav_reply)
+
+                    await ws.send_json({
+                        "event": "media",
+                        "media": { "payload": base64.b64encode(mulaw).decode() }
+                    })
+                case _:
+                    print("Evento não tratado:", msg)
+
     except Exception as e:
-        print(f"Erro no WebSocket: {e}")
+        print(f"❌ Erro no WebSocket: {e}")
     finally:
         await ws.close()
+        
+def convert_wav_to_mulaw(wav_data: bytes) -> bytes:
+    proc = subprocess.run(
+        ["ffmpeg", "-i", "pipe:0", "-ar", "8000", "-ac", "1", "-f", "mulaw", "pipe:1"],
+        input=wav_data,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=True
+    )
+    return proc.stdout
+
+def convert_mulaw_to_wav(payload: bytes) -> bytes:
+    proc = subprocess.run(
+        ["ffmpeg", "-f", "mulaw", "-ar", "8000", "-ac", "1", "-i", "pipe:0", "-ar", "16000", "-ac", "1", "-f", "wav", "pipe:1"],
+        input=payload,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=True
+    )
+    return proc.stdout
+
